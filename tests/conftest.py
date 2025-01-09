@@ -93,6 +93,27 @@ def structures() -> list[Structure]:
 
 
 @pytest.fixture
+def cubic_struct() -> Structure:
+    """Create a simple cubic structure (space group Pm-3m, #221)."""
+    lattice = Lattice.cubic(4.0)
+    return Structure(lattice, ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+
+
+@pytest.fixture
+def tetragonal_struct() -> Structure:
+    """Create a tetragonal structure (space group P4/mmm, #123)."""
+    lattice = Lattice.tetragonal(a=4.0, c=6.0)
+    return Structure(lattice, ["Ti", "O"], [[0, 0, 0], [0.5, 0.5, 0]])
+
+
+@pytest.fixture
+def monoclinic_struct() -> Structure:
+    """Create a monoclinic structure (space group P2/m, #10)."""
+    lattice = Lattice.monoclinic(4, 5, 4, 100)
+    return Structure(lattice, ["Li"], [[0, 0, 0]])
+
+
+@pytest.fixture
 def plotly_scatter_two_ys() -> go.Figure:
     xs = np.arange(7)
     y1 = xs**2
