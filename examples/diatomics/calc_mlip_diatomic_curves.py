@@ -23,9 +23,12 @@ from tqdm import tqdm
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Sequence
+
+    from ase.calculators.calculator import Calculator
 
 __date__ = "2024-03-31"
+module_dir = os.path.dirname(__file__)
 
 
 # %%
@@ -40,7 +43,7 @@ def timer(label: str = "") -> Generator[None, None, None]:
 
 
 def generate_diatomics(
-    elem1: str, elem2: str, distances: list[float] | np.ndarray
+    elem1: str, elem2: str, distances: Sequence[float]
 ) -> list[Atoms]:
     """Build diatomic molecules in vacuum for given distances.
 
@@ -59,7 +62,7 @@ def generate_diatomics(
 
 
 def calc_one_pair(
-    elem1: str, elem2: str, calc: MACECalculator, distances: list[float] | np.ndarray
+    elem1: str, elem2: str, calc: MACECalculator, distances: Sequence[float]
 ) -> list[float]:
     """Calculate potential energy for a pair of elements at given distances.
 
@@ -79,48 +82,55 @@ def calc_one_pair(
 
 
 def calc_homo_diatomics(
-    calculator: MACECalculator, model_name: str
+    calculator: Calculator, model_name: str, atomic_numbers: Sequence[int]
 ) -> dict[str, list[float]]:
     """Generate potential energy data for homonuclear diatomic molecules.
 
     Args:
-        calculator: MACECalculator instance.
+        calculator: ASE calculator instance.
         model_name: Name of the model for the output file.
+        atomic_numbers: List of atomic numbers to calculate for.
+
+    Returns:
+        dict[str, list[float]]: Potential energy data for homonuclear diatomic
+            molecules or None if the file already exists.
     """
+    out_path = f"{module_dir}/homo-nuclear-{model_name}.json.xz"
     distances = np.linspace(0.1, 6.0, 119)
-    allowed_atomic_numbers = calculator.z_table.zs
     # saving the results in a dict: "z0-z1" -> [energy] & saved the distances
     results = {"distances": list(distances)}
     # homo-nuclear diatomics
-    pbar = tqdm(allowed_atomic_numbers, desc=f"Homo-nuclear diatomics for {model_name}")
+    pbar = tqdm(atomic_numbers, desc=f"Homo-nuclear diatomics for {model_name}")
     for z0 in pbar:
         elem1, elem2 = chemical_symbols[z0], chemical_symbols[z0]
         formula = f"{elem1}-{elem2}"
         pbar.set_postfix_str(formula)
         results[formula] = calc_one_pair(elem1, elem2, calculator, distances)
 
-    with lzma.open(f"homo-nuclear-{model_name}.json.xz", mode="wt") as file:
+    with lzma.open(out_path, mode="wt") as file:
         json.dump(results, file)
+    print(f"Saved results to {out_path}")
 
     return results
 
 
 def calc_hetero_diatomics(
-    z0: int, calculator: MACECalculator, model_name: str
+    z0: int, calculator: Calculator, model_name: str, atomic_numbers: Sequence[int]
 ) -> dict[str, list[float]]:
     """Generate potential energy data for hetero-nuclear diatomic molecules with a
     fixed first element and save to .json.xz file.
 
     Args:
-        z0: Atomic number of the fixed first element.
-        calculator: MACECalculator instance.
-        model_name: Name of the model for the output file.
+        z0 (int): Atomic number of the fixed first element.
+        calculator (Calculator): ASE calculator instance.
+        model_name (str): Name of the model for the output file.
+        atomic_numbers (list[int]): List of atomic numbers to calculate for.
 
     Returns:
         dict[str, list[float]]: Potential energy data for hetero-nuclear
             diatomic molecules or None if the file already exists.
     """
-    out_path = f"hetero-nuclear-diatomics-{z0}-{model_name}.json.xz"
+    out_path = f"{module_dir}/hetero-nuclear-diatomics-{z0}-{model_name}.json.xz"
     if os.path.isfile(out_path):
         print(f"Skipping {z0} because {out_path} already exists")
         with lzma.open(out_path, mode="rt") as file:
@@ -128,13 +138,10 @@ def calc_hetero_diatomics(
 
     print(f"Starting {z0}")
     distances = np.linspace(0.1, 6.0, 119)
-    allowed_atomic_numbers = calculator.z_table.zs
     # saving the results in a dict: "z0-z1" -> [energy] & saved the distances
     results = {"distances": list(distances)}
     # hetero-nuclear diatomics
-    pbar = tqdm(
-        allowed_atomic_numbers, desc=f"Hetero-nuclear diatomics for {model_name}"
-    )
+    pbar = tqdm(atomic_numbers, desc=f"Hetero-nuclear diatomics for {model_name}")
     for z1 in pbar:
         elem1, elem2 = chemical_symbols[z0], chemical_symbols[z1]
         formula = f"{elem1}-{elem2}"
@@ -143,17 +150,27 @@ def calc_hetero_diatomics(
 
     with lzma.open(out_path, mode="wt") as file:
         json.dump(results, file)
-
+    print(f"Saved results to {out_path}")
     return results
 
 
 if __name__ == "__main__":
-    mace_mpa_0_medium_url = "https://github.com/ACEsuit/mace-mp/releases/download/mace_mpa_0/mace-mpa-0-medium.model"
-    for checkpoint_path in (mace_mpa_0_medium_url,):
-        calculator = mace_mp(model=checkpoint_path)
-        model_name = os.path.basename(checkpoint_path).split(".")[0]
-        calc_homo_diatomics(calculator, model_name)
+    mace_chkpt_url = "https://github.com/ACEsuit/mace-mp/releases/download"
+    checkpoints = {
+        "mace-mpa-0-medium": f"{mace_chkpt_url}/mace_mpa_0/mace-mpa-0-medium.model",
+        "mace-omat-0-medium": f"{mace_chkpt_url}/mace_omat_0/mace-omat-0-medium.model",
+    }
+    for model_name, checkpoint in checkpoints.items():
+        if model_name.startswith("mace"):
+            calculator = mace_mp(model=checkpoint, default_dtype="float64")
+            atomic_numbers = calculator.z_table.zs
+        else:
+            raise ValueError(f"Unknown model: {model_name}")
+
+        calc_homo_diatomics(calculator, model_name, atomic_numbers=atomic_numbers)
 
         # calculate all hetero-nuclear diatomics (takes a long time)
-        # for z0 in calculator.z_table.zs:
-        #     calc_hetero_diatomics(z0, calculator, model_name)
+        for z0 in calculator.z_table.zs:
+            calc_hetero_diatomics(
+                z0, calculator, model_name, atomic_numbers=atomic_numbers
+            )
